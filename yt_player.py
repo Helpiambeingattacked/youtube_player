@@ -17,7 +17,7 @@ except ImportError:
     PIL_OK = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-PLAYLIST_URL = "https://www.youtube.com/playlist?list=PLtufUwTk5uLKR5fL0Us968O2CnssrTo_1"
+PLAYLIST_URL = ""
 CACHE_FILE   = "playlist_cache.json"
 DOWNLOAD_DIR  = "downloads"
 # ─────────────────────────────────────────────────────────────────────────────
