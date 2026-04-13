@@ -9,6 +9,7 @@ import random
 import urllib.request
 import io
 import socket
+import time
 
 try:
     from PIL import Image, ImageTk
@@ -17,7 +18,7 @@ except ImportError:
     PIL_OK = False
 
 # ─────────────────────────────────────────────────────────────────────────────
-PLAYLIST_URL = ""
+PLAYLIST_URL = "https://www.youtube.com/playlist?list=PLtufUwTk5uLKR5fL0Us968O2CnssrTo_1"
 CACHE_FILE   = "playlist_cache.json"
 DOWNLOAD_DIR  = "downloads"
 # ─────────────────────────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ PIP_OV_BG  = "#0d0d0d"
 PIP_OV_FG  = "#dddddd"
 PIP_OV_DIM = "#666666"
 
-COMPACT_H  = 155
+COMPACT_H  = 105
 EXPANDED_H = 520
 VIDEO_H    = 240
 WIN_W      = 480
@@ -147,6 +148,12 @@ class YouTubeAudioPlayer:
         self._apply_ttk_styles()
         self._load_or_fetch_playlist()
         self._tick()
+
+    def _format_fingerprint(self):
+        """Return a tuple that uniquely identifies the current stream format needs."""
+        need_video = self.video_enabled or self._pip_active
+        quality = self.quality_var.get()
+        return (need_video, quality)
 
     # ══════════════════════════════════════════════════════════════════════════
     #  UI CONSTRUCTION
@@ -262,6 +269,10 @@ class YouTubeAudioPlayer:
                       self.vol_var.get())
                   ).pack(side=tk.LEFT, padx=(2, 8))
         self.player.audio_set_volume(80)
+
+        # Stream URL cache – avoids repeated yt-dlp calls for same format
+        self._stream_cache = {}          # video_url -> {v_url, a_url, title, fingerprint, timestamp}
+        self._stream_cache_ttl = 1800    # seconds (30 minutes) – YouTube URLs typically expire after ~6h
 
         self.list_toggle_btn = self._btn(right, "☰",
                                          self._toggle_playlist, dim=True)
@@ -991,7 +1002,20 @@ class YouTubeAudioPlayer:
                 return f"{base_fmt}/{fallback}"
 
     def _resolve_stream(self, video_url):
-        need_video = self.video_enabled or self._pip_active
+        import time
+
+        fingerprint = self._format_fingerprint()
+        cached = self._stream_cache.get(video_url)
+
+        # Check cache: same fingerprint + not expired
+        if cached and cached.get("fingerprint") == fingerprint:
+            age = time.time() - cached.get("timestamp", 0)
+            if age < self._stream_cache_ttl:
+                # Reuse cached URLs – skip yt-dlp call entirely
+                return cached["v_url"], cached["a_url"], cached["title"]
+
+        # Fingerprint changed, cache expired, or first time – fetch fresh
+        need_video = fingerprint[0]
         if need_video:
             fmt = self._get_format_string()
             if fmt == "bestaudio[ext=m4a]/bestaudio/best":
@@ -1007,9 +1031,19 @@ class YouTubeAudioPlayer:
         if "requested_formats" in info:
             v_url = info["requested_formats"][0]["url"]
             a_url = info["requested_formats"][1]["url"]
-            return v_url, a_url, title
         else:
-            return info["url"], None, title
+            v_url = info["url"]
+            a_url = None
+
+        # Store in cache
+        self._stream_cache[video_url] = {
+            "v_url": v_url,
+            "a_url": a_url,
+            "title": title,
+            "fingerprint": fingerprint,
+            "timestamp": time.time(),
+        }
+        return v_url, a_url, title
 
     def _start_vlc(self, stream_url, audio_url, title):
         media = self.instance.media_new(stream_url)
